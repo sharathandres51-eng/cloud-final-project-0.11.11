@@ -1,0 +1,27 @@
+{
+  "features": [
+    "die_matrix",
+    "lifetime_2nd_strike_s",
+    "oee_cycle_time_s"
+  ],
+  "target": "lifetime_bath_s",
+  "metrics": {
+    "rmse": 1.3268,
+    "mae": 0.6486,
+    "r2": 0.7855
+  },
+  "hyperparameters": {
+    "n_estimators": 200,
+    "max_depth": 6,
+    "learning_rate": 0.1,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8
+  },
+  "die_matrices": [
+    4974,
+    5052,
+    5090,
+    5091
+  ],
+  "oee_median": 13.81
+}
