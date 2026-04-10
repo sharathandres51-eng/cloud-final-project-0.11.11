@@ -1,9 +1,34 @@
-# TODO: Write a Dockerfile that packages the Streamlit app
-#
-# Requirements:
-# - Base image: python:3.13-slim
-# - Install uv from ghcr.io/astral-sh/uv:latest
-# - Copy dependency files and install with uv sync
-# - Copy only: app/, src/, models/, data/gold/
-# - Expose port 8501
-# - CMD: run streamlit on 0.0.0.0:8501
+# syntax=docker/dockerfile:1
+
+# ── Base image ────────────────────────────────────────────────────────────────
+FROM python:3.13-slim
+
+# ── Install uv ────────────────────────────────────────────────────────────────
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
+# ── Set working directory ─────────────────────────────────────────────────────
+WORKDIR /app
+
+# ── Install only app-runtime dependencies ─────────────────────────────────────
+RUN uv pip install --system --no-cache \
+    streamlit \
+    xgboost \
+    scikit-learn \
+    pandas \
+    pyarrow
+
+# ── Copy only what the app needs ──────────────────────────────────────────────
+COPY src/ ./src/
+COPY app/ ./app/
+COPY models/ ./models/
+COPY data/gold/ ./data/gold/
+
+# ── Make the vaultech_analysis package importable ─────────────────────────────
+ENV PYTHONPATH=/app/src
+
+# ── Expose Streamlit port ─────────────────────────────────────────────────────
+EXPOSE 8501
+
+# ── Run the app ───────────────────────────────────────────────────────────────
+CMD ["streamlit", "run", "app/streamlit_app.py", \
+     "--server.address=0.0.0.0", "--server.port=8501"]
