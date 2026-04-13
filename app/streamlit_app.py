@@ -212,3 +212,20 @@ else:
         "Reference (s)": [ref[c] for c in PARTIAL_COLS],
     }).set_index("Segment")
     st.bar_chart(chart_df, use_container_width=True)
+
+    # ── Inference debug panel ─────────────────────────────────────────────────
+    st.divider()
+    st.markdown("**Inference debug — SageMaker endpoint**")
+    predictor = load_predictor()
+    debug_result = predictor.predict(
+        die_matrix=int(piece["die_matrix"]),
+        lifetime_2nd_strike_s=float(piece["lifetime_2nd_strike_s"]),
+        oee_cycle_time_s=float(piece["oee_cycle_time_s"]),
+    )
+    if "debug" in debug_result:
+        dbg = debug_result["debug"]
+        col_a, col_b, col_c = st.columns(3)
+        col_a.metric("Endpoint", dbg["endpoint_name"])
+        col_b.metric("Predicted bath (s)", debug_result["predicted_bath_time_s"])
+        col_c.metric("Latency (ms)", dbg["latency_ms"])
+        st.code(f"Payload sent:     {dbg['payload']}\nRaw response:     {dbg['raw_response']}", language="text")

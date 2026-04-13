@@ -1,7 +1,8 @@
 """
 Inference service for predicting total piece travel time.
 
-Loads the trained XGBoost model and provides predictions.
+Calls the SageMaker endpoint for predictions instead of loading
+the model locally.
 
 Usage as CLI:
     uv run python -m vaultech_analysis.inference --die-matrix 5052 --strike2 18.3 --oee 13.5
@@ -14,25 +15,30 @@ Usage as module (for Streamlit):
 
 import argparse
 import json
+import os
+import time
 from pathlib import Path
 
+import boto3
 import pandas as pd
-from xgboost import XGBRegressor
 
 
-MODEL_DIR = Path(__file__).resolve().parent.parent.parent / "models"
 GOLD_FILE = Path(__file__).resolve().parent.parent.parent / "data" / "gold" / "pieces.parquet"
+MODEL_DIR = Path(__file__).resolve().parent.parent.parent / "models"
+
+# SageMaker endpoint config — can be overridden via environment variables
+ENDPOINT_NAME = os.environ.get("SAGEMAKER_ENDPOINT_NAME", "vaultech-bath-endpoint")
+REGION = os.environ.get("AWS_DEFAULT_REGION", "eu-west-1")
 
 
 class Predictor:
-    """Loads the trained model and provides predictions."""
+    """Calls the SageMaker endpoint for predictions."""
 
-    def __init__(self, model_dir: Path = MODEL_DIR, gold_file: Path = GOLD_FILE):
-        # Load the XGBoost model
-        self.model = XGBRegressor()
-        self.model.load_model(model_dir / "xgboost_bath_predictor.json")
+    def __init__(self, gold_file: Path = GOLD_FILE, model_dir: Path = MODEL_DIR):
+        self.runtime = boto3.client("sagemaker-runtime", region_name=REGION)
+        self.endpoint_name = ENDPOINT_NAME
 
-        # Load model metadata
+        # Load model metadata for validation and defaults
         with open(model_dir / "model_metadata.json") as f:
             self.metadata = json.load(f)
 
@@ -55,7 +61,7 @@ class Predictor:
         lifetime_2nd_strike_s: float,
         oee_cycle_time_s: float | None = None,
     ) -> dict:
-        """Predict total bath time from early-stage features."""
+        """Predict total bath time via SageMaker endpoint."""
 
         # Validate die_matrix
         if die_matrix not in self.die_matrices:
@@ -64,33 +70,53 @@ class Predictor:
         # Use median internally for prediction, but keep original value in response
         oee_for_prediction = oee_cycle_time_s if oee_cycle_time_s is not None else self.oee_median
 
-        # Build input DataFrame
-        X = pd.DataFrame([{
-            "die_matrix": die_matrix,
-            "lifetime_2nd_strike_s": lifetime_2nd_strike_s,
-            "oee_cycle_time_s": oee_for_prediction,
-        }])
+        # Build CSV payload
+        payload = f"{die_matrix},{lifetime_2nd_strike_s},{oee_for_prediction}"
 
-        # Predict
-        predicted = float(self.model.predict(X[self.features])[0])
+        # Call SageMaker endpoint and measure latency
+        start = time.time()
+        response = self.runtime.invoke_endpoint(
+            EndpointName=self.endpoint_name,
+            ContentType="text/csv",
+            Body=payload,
+        )
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        raw_response = response["Body"].read().decode("utf-8").strip()
+        predicted = float(raw_response)
 
         return {
             "predicted_bath_time_s": round(predicted, 3),
             "die_matrix": die_matrix,
             "lifetime_2nd_strike_s": lifetime_2nd_strike_s,
-            "oee_cycle_time_s": oee_cycle_time_s,  # Return original None if not provided
+            "oee_cycle_time_s": oee_cycle_time_s,
             "model_metrics": self.metrics,
+            # Debug info for inference panel
+            "debug": {
+                "endpoint_name": self.endpoint_name,
+                "payload": payload,
+                "raw_response": raw_response,
+                "latency_ms": latency_ms,
+            },
         }
 
     def predict_batch(self, df: pd.DataFrame) -> pd.Series:
-        """Predict bath time for a DataFrame of pieces."""
+        """Predict bath time for a DataFrame of pieces via SageMaker endpoint."""
 
-        # Fill missing OEE with median
         df = df.copy()
         df["oee_cycle_time_s"] = df["oee_cycle_time_s"].fillna(self.oee_median)
 
-        # Predict
-        predictions = self.model.predict(df[self.features])
+        predictions = []
+        for _, row in df.iterrows():
+            payload = f"{int(row['die_matrix'])},{row['lifetime_2nd_strike_s']},{row['oee_cycle_time_s']}"
+            response = self.runtime.invoke_endpoint(
+                EndpointName=self.endpoint_name,
+                ContentType="text/csv",
+                Body=payload,
+            )
+            pred = float(response["Body"].read().decode("utf-8").strip())
+            predictions.append(pred)
+
         return pd.Series(predictions, index=df.index)
 
 

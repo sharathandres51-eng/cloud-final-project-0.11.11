@@ -15,12 +15,13 @@ RUN uv pip install --system --no-cache \
     xgboost \
     scikit-learn \
     pandas \
-    pyarrow
+    pyarrow \
+    boto3
 
-# ── Copy only what the app needs ──────────────────────────────────────────────
+# ── Copy only what the app needs (no models/ — inference is via SageMaker) ───
 COPY src/ ./src/
 COPY app/ ./app/
-COPY models/ ./models/
+COPY models/model_metadata.json ./models/model_metadata.json
 COPY data/gold/ ./data/gold/
 
 # ── Make the vaultech_analysis package importable ─────────────────────────────
